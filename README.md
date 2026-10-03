@@ -14,6 +14,19 @@ see [`docs/PROTOCOL.md`](docs/PROTOCOL.md) for the wire format.
 No phone, no app, no cloud. Just BLE GATT writes from your machine, now
 with Rust's fearless concurrency.
 
+## Philosophy: raw by design
+
+Yeah, we know there are bigger libs out there with everything-and-the-kitchen-sink built in. That's not this one.
+
+This crate is intentionally low-level and dependency-light. No CLI, no MQTT,
+no HASS, no HTTP server strapped on the side. No extra cruft. Just typed,
+byte-identical frames straight to the strip — with `*_raw()` escape hatches
+and public `const fn` builders, so your hands are untied and you can work
+as low as you want.
+
+If you want the cozy high-level stuff — CLI, MQTT, HASS, HTTP and all that
+shitty garbage — that will live in a separate crate one day. Not here.
+
 ```rust
 use std::time::Duration;
 use lotus_lantern::{Ble, EffectMode, Lamp, LightMode};
