@@ -9,7 +9,7 @@
 //! 21-byte form the firmware expects. It never changes *what* the command
 //! means — a brightness-80 stays a brightness-80.
 
-use rand::RngCore;
+use rand::Rng;
 
 /// Keystream preset from the Kotlin source.
 pub const PRESET_KEY: [u8; 16] = [
