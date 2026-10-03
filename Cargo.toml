@@ -1,0 +1,42 @@
+[package]
+name = "lotus-lantern"
+version = "0.1.0"
+edition = "2021"
+description = "Async Rust client for Lotus Lantern / BLEDOM BLE LED-strip controllers (ELK-BLEDOM family)"
+license = "MIT"
+authors = ["Tamerlan Tulepbergenov <https://github.com/bejiihiu>"]
+repository = "https://github.com/bejiihiu/lotus-lantern"
+keywords = ["ble", "bluetooth", "led", "beldom", "gatt"]
+categories = ["hardware-support", "embedded"]
+
+[lib]
+name = "lotus_lantern"
+path = "src/lib.rs"
+
+[dependencies]
+btleplug = "0.11"
+chrono = "0.4"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync"] }
+uuid = "1"
+thiserror = "2"
+rand = "0.9"
+futures = "0.3"
+
+[dev-dependencies]
+anyhow = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync", "test-util"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
