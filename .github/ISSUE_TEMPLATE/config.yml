@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Protocol reference
+    url: https://github.com/bejiihiu/lotus-lantern/blob/main/docs/PROTOCOL.md
+    about: Wire format for 9-byte frames before opening a protocol issue.
+  - name: Original Go client
+    url: https://github.com/Rxflex/LotusLantern
+    about: Upstream reverse-engineering source.
