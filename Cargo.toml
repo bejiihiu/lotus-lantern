@@ -6,6 +6,8 @@ description = "Async Rust client for Lotus Lantern / BLEDOM BLE LED-strip contro
 license = "MIT"
 authors = ["Tamerlan Tulepbergenov <https://github.com/bejiihiu>"]
 repository = "https://github.com/bejiihiu/lotus-lantern"
+documentation = "https://docs.rs/lotus-lantern"
+readme = "README.md"
 keywords = ["ble", "bluetooth", "led", "beldom", "gatt"]
 categories = ["hardware-support", "embedded"]
 

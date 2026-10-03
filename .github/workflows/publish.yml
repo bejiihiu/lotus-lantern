@@ -1,0 +1,40 @@
+name: publish
+
+# автопубликация в crates.io: на каждый push в main с новой версией.
+# если версия из Cargo.toml уже есть на crates.io — джоба тихо скипается.
+# нужен секрет CARGO_REGISTRY_TOKEN в Settings → Secrets → Actions.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'README.md'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux BLE deps (BlueZ/D-Bus for btleplug)
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check if this version is already on crates.io
+        id: check
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "lotus-lantern") | .version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if curl -sf "https://crates.io/api/v1/crates/lotus-lantern/$version" > /dev/null; then
+            echo "already published, skipping"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "new version, will publish"
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish to crates.io
+        if: steps.check.outputs.published == 'false'
+        run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
