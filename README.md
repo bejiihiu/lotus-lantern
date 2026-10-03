@@ -1,5 +1,8 @@
 # lotus-lantern (Rust)
 
+[![crates.io](https://img.shields.io/crates/v/lotus-lantern.svg)](https://crates.io/crates/lotus-lantern)
+[![docs.rs](https://img.shields.io/docsrs/lotus-lantern.svg)](https://docs.rs/lotus-lantern)
+
 Rust port of the Go client **[Rxflex/LotusLantern](https://github.com/Rxflex/LotusLantern)** —
 same protocol, same bytes, async `tokio` + [`btleplug`](https://github.com/deviceplug/btleplug) transport.
 
@@ -28,9 +31,15 @@ lamp.close().await?;
 
 ## Install
 
+```bash
+cargo add lotus-lantern
+```
+
+or in `Cargo.toml`:
+
 ```toml
 [dependencies]
-lotus-lantern = "0.1"
+lotus-lantern = "0.2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
@@ -55,6 +64,15 @@ cargo run --example scan
 
 # Color cycle on the first one found (starts dim — strip-friendly)
 cargo run --example demo
+
+# Power + smooth brightness fade
+cargo run --example power
+
+# Built-in effects + HSV rainbow
+cargo run --example effects
+
+# Controller clock + countdown timer
+cargo run --example clock
 ```
 
 > First run on a new strip? The demo warms up at brightness 40 before
@@ -65,17 +83,24 @@ cargo run --example demo
 ### Discovery & connection
 - `Ble::new()` — bring up the default adapter.
 - `Ble::discover(timeout)` — first matching lamp; `Ble::scan(timeout)` — all of them.
+- `Ble::scan_sorted(timeout)` — all of them, strongest RSSI first.
+- `Ble::scan_filtered(timeout, pred)` / `Ble::discover_filtered(timeout, pred)` — filter by advertised name.
 - `Lamp::connect(&ble, addr, name)` — connect to a known lamp.
+- `Lamp::connect_with_options(&ble, addr, name, ConnectOptions)` — custom timeout/retries.
+- `Lamp::is_connected()` / `Lamp::is_encrypted()` — link state helpers.
 - `Lamp::close()` — disconnect.
 - `Lamp::send_batch(frames, delay)` — send raw 9-byte frames in sequence.
 
 ### Power & color
 - `light_on(bool)`, `set_color_rgb(r, g, b)` / `set_color(0xRRGGBB)`,
-  `set_color_temperature(warm, cold)`, `set_single_color(idx)`,
-  `set_brightness(level, light_mode)`, `set_pin_sequence(seq)`.
+  `set_hsv(h, s, v)`, `set_color_temperature(warm, cold)`, `set_single_color(idx)`,
+  `set_brightness(level, light_mode)`, `fade_brightness(from, to, steps, mode, delay)`,
+  `set_pin_sequence(seq)`.
+- Pure helpers: `hsv_to_rgb(h, s, v)`, `brightness_steps(from, to, steps)`.
 
 ### Effects / mic / laser / timing / RGBW
-- `set_mode(mode)`, `set_mode_speed(speed)`, `music_amplitude(color, brightness)`.
+- `set_mode(mode)`, `set_mode_speed(speed)`, `set_effect(mode, speed)`,
+  `music_amplitude(color, brightness)`.
 - `set_mic_on_off`, `set_mic_sensitive`, `set_mic_eq_mode`.
 - `set_laser`, `set_laser_mode`, `set_laser_speed`.
 - `set_countdown`, `send_system_time`, `send_timing_status`.

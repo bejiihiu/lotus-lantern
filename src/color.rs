@@ -6,6 +6,56 @@
 
 // single-letter channel names are the domain language here (r/g/b/h/s/v),
 // same as the Java original — not laziness.
+
+/// HSV (`h` 0..=360, `s`/`v` 0..=255) to RGB channels.
+///
+/// integer math, no float — результат сразу годится в `set_color_rgb`.
+/// серая зона (`s == 0`) даёт `v, v, v` без оглядки на `h`.
+#[allow(clippy::many_single_char_names, clippy::cast_possible_truncation)]
+#[must_use]
+pub fn hsv_to_rgb(h: u16, s: u8, v: u8) -> (u8, u8, u8) {
+    if s == 0 {
+        return (v, v, v);
+    }
+    let h = h % 360;
+    let region = h / 60;
+    let rem = h % 60;
+    // ramp up/down внутри сектора, всё в u32 чтоб не переполниться)
+    let (s32, v32, rem32) = (u32::from(s), u32::from(v), u32::from(rem));
+    let p = ((v32 * (255 - s32)) / 255) as u8;
+    let q = ((v32 * (255 - (s32 * rem32) / 60)) / 255) as u8;
+    let t = ((v32 * (255 - (s32 * (60 - rem32)) / 60)) / 255) as u8;
+    match region {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    }
+}
+
+/// Шаги плавного перехода яркости `from` → `to` за `steps` шагов.
+///
+/// чистая математика для `fade_brightness` — крайние точки включены,
+/// `steps == 0` даёт просто `[to]`.
+#[allow(clippy::cast_sign_loss)]
+#[must_use]
+pub fn brightness_steps(from: u8, to: u8, steps: u8) -> Vec<u8> {
+    if steps == 0 {
+        return vec![to];
+    }
+    // шаг ≤ 255, так что i32 хватает с запасом; касты u8->i32 точные)
+    let n = i32::from(steps);
+    let (f, t) = (i32::from(from), i32::from(to));
+    (0..=n)
+        .map(|i| {
+            let v = f + (t - f) * i / n;
+            v.clamp(0, 255) as u8
+        })
+        .collect()
+}
+
 /// Replace the V channel of `rgb` (`0xRRGGBB`) with `brightness`.
 ///
 /// Returns packed `0xAARRGGBB` like the Java original.
@@ -110,5 +160,30 @@ mod tests {
                 assert!(((out >> shift) & 0xFF) <= u32::from(bri));
             }
         }
+    }
+
+    #[test]
+    fn hsv_primaries() {
+        assert_eq!(hsv_to_rgb(0, 255, 255), (255, 0, 0));
+        assert_eq!(hsv_to_rgb(120, 255, 255), (0, 255, 0));
+        assert_eq!(hsv_to_rgb(240, 255, 255), (0, 0, 255));
+    }
+
+    #[test]
+    fn hsv_gray_ignores_hue() {
+        assert_eq!(hsv_to_rgb(123, 0, 77), (77, 77, 77));
+        assert_eq!(hsv_to_rgb(0, 0, 0), (0, 0, 0));
+    }
+
+    #[test]
+    fn hsv_wraps_360_to_red() {
+        assert_eq!(hsv_to_rgb(360, 255, 255), hsv_to_rgb(0, 255, 255));
+    }
+
+    #[test]
+    fn brightness_steps_include_endpoints() {
+        assert_eq!(brightness_steps(10, 20, 2), vec![10, 15, 20]);
+        assert_eq!(brightness_steps(20, 10, 2), vec![20, 15, 10]);
+        assert_eq!(brightness_steps(5, 99, 0), vec![99]);
     }
 }

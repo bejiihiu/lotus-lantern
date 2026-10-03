@@ -50,6 +50,21 @@ impl Ble {
 
     /// Scan for `timeout_` and return every matching lamp.
     pub async fn scan(&self, timeout_: Duration) -> Result<Vec<DiscoveredLamp>> {
+        self.scan_filtered(timeout_, |_| true).await
+    }
+
+    /// Scan + filter by advertised name, strongest signal first.
+    ///
+    /// `predicate` решает, брать ли лампу (например `|n| n.starts_with("ELK-")`);
+    /// сортировка по `rssi` — без сигнала (`None`) в конце.
+    ///
+    /// # Errors
+    /// Propagates [`Error::Bluetooth`] from the adapter.
+    pub async fn scan_filtered(
+        &self,
+        timeout_: Duration,
+        predicate: impl Fn(&str) -> bool,
+    ) -> Result<Vec<DiscoveredLamp>> {
         self.adapter
             .start_scan(ScanFilter::default())
             .await
@@ -63,7 +78,7 @@ impl Ble {
             let props = p.properties().await.map_err(Error::Bluetooth)?;
             let Some(props) = props else { continue };
             let name = props.local_name.unwrap_or_default();
-            if !is_supported_name(&name) {
+            if !is_supported_name(&name) || !predicate(&name) {
                 continue;
             }
             out.push(DiscoveredLamp {
@@ -72,7 +87,17 @@ impl Ble {
                 rssi: props.rssi,
             });
         }
+        // strongest first, unknown signal last)
+        out.sort_by_key(|l| std::cmp::Reverse(l.rssi.unwrap_or(i16::MIN)));
         Ok(out)
+    }
+
+    /// Scan for `timeout_` and return every matching lamp, strongest first.
+    ///
+    /// # Errors
+    /// Propagates [`Error::Bluetooth`] from the adapter.
+    pub async fn scan_sorted(&self, timeout_: Duration) -> Result<Vec<DiscoveredLamp>> {
+        self.scan_filtered(timeout_, |_| true).await
     }
 
     /// Scan for the *first* matching lamp, like Go's `Discover`.
@@ -83,6 +108,18 @@ impl Ble {
     /// # Errors
     /// Returns [`Error::LampNotFound`] when nothing matches in time.
     pub async fn discover(&self, timeout_: Duration) -> Result<DiscoveredLamp> {
+        self.discover_filtered(timeout_, |_| true).await
+    }
+
+    /// First lamp whose advertised name passes `predicate`.
+    ///
+    /// # Errors
+    /// Returns [`Error::LampNotFound`] when nothing matches in time.
+    pub async fn discover_filtered(
+        &self,
+        timeout_: Duration,
+        predicate: impl Fn(&str) -> bool,
+    ) -> Result<DiscoveredLamp> {
         self.adapter
             .start_scan(ScanFilter::default())
             .await
@@ -95,7 +132,7 @@ impl Ble {
                 let props = p.properties().await.map_err(Error::Bluetooth)?;
                 let Some(props) = props else { continue };
                 let name = props.local_name.unwrap_or_default();
-                if is_supported_name(&name) {
+                if is_supported_name(&name) && predicate(&name) {
                     hit = Some(DiscoveredLamp {
                         addr: props.address.to_string(),
                         name,

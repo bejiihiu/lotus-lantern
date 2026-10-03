@@ -26,8 +26,12 @@
 //!
 //! * [`frame`] — pure 9-byte frame builders (`const fn`, zero-alloc).
 //! * [`encryption`] — XOR cipher for `ELK-*` devices, zero-copy.
-//! * [`color`] / [`timing`] — ports of `Utils.newColor` / `getTimeStamp`.
+//! * [`color`] / [`timing`] — ports of `Utils.newColor` / `getTimeStamp`,
+//!   plus [`color::hsv_to_rgb`] and [`color::brightness_steps`] for the
+//!   `set_hsv` / `fade_brightness` helpers.
 //! * [`Ble`] / [`Lamp`] — async btleplug transport with BLEDOM reconnect quirks.
+//!   [`Lamp::set_effect`] combines mode + speed, [`Lamp::connect_with_options`]
+//!   tunes timeouts/retries, [`Ble::scan_sorted`] sorts by RSSI.
 //!
 //! ## Performance notes
 //!
@@ -45,7 +49,7 @@ mod lamp;
 mod timing;
 
 pub use ble::{Ble, DiscoveredLamp};
-pub use color::blend_brightness;
+pub use color::{blend_brightness, brightness_steps, hsv_to_rgb};
 pub use consts::{
     is_encrypted_device, is_supported_name, ENCRYPTION_MARKER, NAME_FILTER, NAME_LED_LIGHT_STRIP,
     NAME_NEW_STRENGTH, NAME_PREFIXES, NAME_WAVY_FILTER, SERVICE_UUID, WRITE_CHAR_UUID,
@@ -63,5 +67,5 @@ pub use frame::{
     COMMAND_MIC, COMMAND_MODE, COMMAND_PIN_ORDER, COMMAND_POWER_RGBW, COMMAND_RGB,
     COMMAND_SYSTEM_TIME, COMMAND_TIMING, COMMAND_TIMING_STATUS, DEFAULT_PIN_SEQUENCE,
 };
-pub use lamp::Lamp;
+pub use lamp::{ConnectOptions, Lamp};
 pub use timing::{countdown_delay, pack_hour_minute};

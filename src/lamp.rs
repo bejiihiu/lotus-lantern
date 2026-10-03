@@ -18,18 +18,41 @@ use btleplug::platform::{Adapter, Peripheral};
 use tokio::time::{sleep, timeout};
 
 use crate::{
-    blend_brightness, brightness_frame, color_frame, color_rgb_frame, color_temperature_frame,
-    countdown_delay, countdown_frame, encrypt_into, header_swapped, is_encryptable_cmd,
-    is_encrypted_device, is_supported_name, is_well_formed, laser_frame, laser_mode_frame,
-    laser_speed_frame, light_on_frame, mic_eq_mode_frame, mic_on_off_frame, mic_sensitive_frame,
-    mode_frame, mode_speed_frame, music_amplitude_frame, pin_sequence_frame, rgbw_status_frame,
-    single_color_frame, system_time_frame, timing_status_frame, Ble, Error, Frame, Result,
-    SERVICE_UUID, WRITE_CHAR_UUID,
+    blend_brightness, brightness_frame, brightness_steps, color_frame, color_rgb_frame,
+    color_temperature_frame, countdown_delay, countdown_frame, encrypt_into, header_swapped,
+    hsv_to_rgb, is_encryptable_cmd, is_encrypted_device, is_supported_name, is_well_formed,
+    laser_frame, laser_mode_frame, laser_speed_frame, light_on_frame, mic_eq_mode_frame,
+    mic_on_off_frame, mic_sensitive_frame, mode_frame, mode_speed_frame, music_amplitude_frame,
+    pin_sequence_frame, rgbw_status_frame, single_color_frame, system_time_frame,
+    timing_status_frame, Ble, Error, Frame, Result, SERVICE_UUID, WRITE_CHAR_UUID,
 };
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const SERVICE_DISCOVERY_RETRIES: usize = 25;
 const WRITE_RETRIES: usize = 3;
+
+/// Tuning knobs for [`Lamp::connect_with_options`].
+///
+/// дефолт = старые константы, поведение `connect()` не меняется.
+#[derive(Debug, Clone)]
+pub struct ConnectOptions {
+    /// Deadline for BLE connect + each scan sweep.
+    pub timeout: Duration,
+    /// How many times service discovery is retried (BLEDOM flakes).
+    pub discovery_retries: usize,
+    /// How many times a frame write is retried (link drops every 3–10 writes).
+    pub write_retries: usize,
+}
+
+impl Default for ConnectOptions {
+    fn default() -> Self {
+        Self {
+            timeout: CONNECT_TIMEOUT,
+            discovery_retries: SERVICE_DISCOVERY_RETRIES,
+            write_retries: WRITE_RETRIES,
+        }
+    }
+}
 
 /// Active connection to one LED controller.
 #[derive(Debug)]
@@ -39,6 +62,7 @@ pub struct Lamp {
     is_encrypted: bool,
     addr: String,
     name: String,
+    opts: ConnectOptions,
 }
 
 impl Lamp {
@@ -48,20 +72,48 @@ impl Lamp {
     /// (Windows `bthleenum.sys` needs it), then dials with service-discovery
     /// retries to ride out BLEDOM flakiness.
     ///
+    /// Same as `connect_with_options` with [`ConnectOptions::default`].
+    ///
     /// # Errors
     /// * [`Error::DeviceNotSeen`] — address never appeared during the scan.
     /// * [`Error::ServiceNotFound`] / [`Error::CharacteristicNotFound`].
     pub async fn connect(ble: &Ble, addr: &str, name: &str) -> Result<Self> {
-        let peripheral = find_peripheral(ble.adapter(), addr).await?;
+        Self::connect_with_options(ble, addr, name, ConnectOptions::default()).await
+    }
+
+    /// Connect with custom timeouts/retries.
+    ///
+    /// # Errors
+    /// Same as [`Lamp::connect`].
+    pub async fn connect_with_options(
+        ble: &Ble,
+        addr: &str,
+        name: &str,
+        opts: ConnectOptions,
+    ) -> Result<Self> {
+        let peripheral = find_peripheral(ble.adapter(), addr, opts.timeout).await?;
         let mut lamp = Self {
             peripheral,
             write_char: empty_char(),
             is_encrypted: is_encrypted_device(name),
             addr: addr.to_owned(),
             name: name.to_owned(),
+            opts,
         };
         lamp.dial().await?;
         Ok(lamp)
+    }
+
+    /// `true` when the lamp name carries the `ELK-*` marker,
+    /// i.e. frames with `CMD ∈ {1, 3, 4}` go out XOR-encrypted.
+    #[must_use]
+    pub fn is_encrypted(&self) -> bool {
+        self.is_encrypted
+    }
+
+    /// Best-effort link check; `false` on any error too.
+    pub async fn is_connected(&self) -> bool {
+        self.peripheral.is_connected().await.unwrap_or(false)
     }
 
     /// Advertised name of the connected lamp.
@@ -108,6 +160,38 @@ impl Lamp {
         self.send_frame(color_frame(rgb)).await
     }
 
+    /// Static color from HSV (`h` 0..=360, `s`/`v` 0..=255).
+    ///
+    /// # Errors
+    /// Propagates [`Error`] from the underlying frame write.
+    #[allow(clippy::many_single_char_names)]
+    pub async fn set_hsv(&self, h: u16, s: u8, v: u8) -> Result<()> {
+        let (r, g, b) = hsv_to_rgb(h, s, v);
+        self.set_color_rgb(r, g, b).await
+    }
+
+    /// Smooth brightness ramp `from` → `to` in `steps` increments.
+    ///
+    /// шагает через [`brightness_steps`] и спит `step_delay` между шагами.
+    /// на новом стрипе вызывай от низкого к высокому, не наоборот.
+    ///
+    /// # Errors
+    /// Propagates [`Error`] from the underlying frame writes.
+    pub async fn fade_brightness(
+        &self,
+        from: u8,
+        to: u8,
+        steps: u8,
+        light_mode: u8,
+        step_delay: Duration,
+    ) -> Result<()> {
+        for level in brightness_steps(from, to, steps) {
+            self.set_brightness(level, light_mode).await?;
+            sleep(step_delay).await;
+        }
+        Ok(())
+    }
+
     /// Brightness `0..=255`. New strip? Start around 30–80.
     pub async fn set_brightness(&self, level: u8, light_mode: u8) -> Result<()> {
         self.send_frame(brightness_frame(level, light_mode)).await
@@ -146,6 +230,15 @@ impl Lamp {
     /// Dynamic effect speed.
     pub async fn set_mode_speed(&self, speed: u8) -> Result<()> {
         self.send_frame(mode_speed_frame(speed)).await
+    }
+
+    /// Effect + speed in one call: `set_mode` then `set_mode_speed`.
+    ///
+    /// # Errors
+    /// Propagates [`Error`] from the first failing frame write.
+    pub async fn set_effect(&self, mode: u8, speed: u8) -> Result<()> {
+        self.set_mode(mode).await?;
+        self.set_mode_speed(speed).await
     }
 
     /// Music-react amplitude color; `brightness` remixes the V channel first
@@ -237,7 +330,7 @@ impl Lamp {
             .await
             .map_err(Error::Bluetooth)?
         {
-            timeout(CONNECT_TIMEOUT, self.peripheral.connect())
+            timeout(self.opts.timeout, self.peripheral.connect())
                 .await
                 .map_err(|_| Error::Timeout)?
                 .map_err(Error::Bluetooth)?;
@@ -246,7 +339,7 @@ impl Lamp {
         sleep(Duration::from_secs(1)).await;
 
         let mut last_err: Option<Error> = None;
-        for _ in 0..SERVICE_DISCOVERY_RETRIES {
+        for _ in 0..self.opts.discovery_retries.max(1) {
             match self.peripheral.discover_services().await {
                 Ok(()) => {
                     last_err = None;
@@ -302,7 +395,7 @@ impl Lamp {
             &plain
         };
 
-        for _ in 0..WRITE_RETRIES {
+        for _ in 0..self.opts.write_retries.max(1) {
             let connected = self
                 .peripheral
                 .is_connected()
@@ -316,6 +409,7 @@ impl Lamp {
                     is_encrypted: self.is_encrypted,
                     addr: self.addr.clone(),
                     name: self.name.clone(),
+                    opts: self.opts.clone(),
                 };
                 sleep(Duration::from_secs(2)).await;
                 if this.dial().await.is_err() {
@@ -359,12 +453,12 @@ fn empty_char() -> btleplug::api::Characteristic {
     }
 }
 
-async fn find_peripheral(adapter: &Adapter, addr: &str) -> Result<Peripheral> {
+async fn find_peripheral(adapter: &Adapter, addr: &str, timeout_: Duration) -> Result<Peripheral> {
     adapter
         .start_scan(ScanFilter::default())
         .await
         .map_err(Error::Bluetooth)?;
-    let deadline = tokio::time::Instant::now() + CONNECT_TIMEOUT;
+    let deadline = tokio::time::Instant::now() + timeout_;
     let wanted = addr.to_lowercase();
     loop {
         let peripherals = adapter.peripherals().await.map_err(Error::Bluetooth)?;
