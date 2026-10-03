@@ -1,0 +1,30 @@
+name: Feature request
+description: Propose a new API, example, or docs improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can't you do today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Suggested API or behavior (with byte layout if it touches the protocol).
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - API
+        - BLE / connect
+        - protocol frames
+        - examples / docs
+        - CI / release
+    validations:
+      required: false
