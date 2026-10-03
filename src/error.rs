@@ -31,6 +31,15 @@ pub enum Error {
     /// Operation hit its deadline.
     #[error("operation timed out")]
     Timeout,
+    /// A method needed a live link but the peripheral is not connected.
+    #[error("not connected to lamp")]
+    NotConnected,
+    /// GATT notify subscription failed (detail carries the backend message).
+    #[error("subscribe failed: {0}")]
+    SubscribeFailed(String),
+    /// A parameter is outside the range the firmware understands.
+    #[error("invalid parameter: {0}")]
+    InvalidParam(String),
     /// Underlying btleplug failure.
     #[error("bluetooth: {0}")]
     Bluetooth(#[from] btleplug::Error),

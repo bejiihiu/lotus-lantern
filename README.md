@@ -16,16 +16,16 @@ with Rust's fearless concurrency.
 
 ```rust
 use std::time::Duration;
-use lotus_lantern::{Ble, Lamp};
+use lotus_lantern::{Ble, EffectMode, Lamp, LightMode};
 
 let ble = Ble::new().await?;
-let found = ble.discover(Duration::from_secs(15)).await?;
+let found = ble.discover(Duration::from_secs(8)).await?;
 let lamp = Lamp::connect(&ble, &found.addr, &found.name).await?;
 
 lamp.light_on(true).await?;
 lamp.set_color_rgb(255, 0, 128).await?;
-lamp.set_brightness(180, 0).await?;
-lamp.set_mode(5).await?;
+lamp.set_brightness(60, LightMode::Mode0).await?;
+lamp.set_effect(EffectMode::Breathe, 128).await?;
 lamp.close().await?;
 ```
 
@@ -59,52 +59,89 @@ Platform stack: [`btleplug`](https://github.com/deviceplug/btleplug) +
 ## Examples
 
 ```bash
-# List nearby lamps
+# List nearby lamps (read-only, safest first run)
 cargo run --example scan
 
 # Color cycle on the first one found (starts dim — strip-friendly)
 cargo run --example demo
 
-# Power + smooth brightness fade
-cargo run --example power
-
-# Built-in effects + HSV rainbow
+# Built-in effects (typed EffectMode) + HSV rainbow
 cargo run --example effects
 
-# Controller clock + countdown timer
-cargo run --example clock
+# Controller clock + PowerOn timer + 0x85 timing readback
+cargo run --example timing
+
+# White balance + pin order + RGBW mask
+cargo run --example rgbw
+
+# Evening scene in one throttled batch
+cargo run --example batch
 ```
 
 > First run on a new strip? The demo warms up at brightness 40 before
 > doing anything vivid. Your LEDs will thank you.
 
+See [`docs/EXAMPLES.md`](docs/EXAMPLES.md) for what each example is for.
+
 ## API
+
+Typed enums replace the old magic `u8`s everywhere a named value exists.
+Each one has a `Custom(u8)` escape hatch plus a `*_raw(u8)` method on
+`Lamp`, so unknown firmware values keep working byte-identical:
+
+- `EffectMode::{Jump, Strobe, Breathe, Warning, Custom(u8)}`
+- `LightMode::{Mode0..=Mode4, Custom(u8)}`
+- `MicEqMode::{Mode0..=Mode2, Custom(u8)}`
+- `LaserState::{On, Off, Custom(u8)}` / `LaserMode::{Mode0..=Mode2, Custom(u8)}`
+- `TimingMode::{PowerOff, PowerOn, Custom(u8)}`
 
 ### Discovery & connection
 - `Ble::new()` — bring up the default adapter.
-- `Ble::discover(timeout)` — first matching lamp; `Ble::scan(timeout)` — all of them.
-- `Ble::scan_sorted(timeout)` — all of them, strongest RSSI first.
-- `Ble::scan_filtered(timeout, pred)` / `Ble::discover_filtered(timeout, pred)` — filter by advertised name.
+- `Ble::discover(timeout)` / `Ble::discover_filtered(timeout, pred)` /
+  `Ble::discover_with_filter(timeout, rssi_min, pred)` — first matching lamp.
+- `Ble::scan(timeout)` — all lamps, deduplicated by address, strongest
+  RSSI first. `Ble::scan_sorted(timeout)` — same, explicit alias.
+- `Ble::scan_filtered(timeout, pred)` /
+  `Ble::scan_with_options(timeout, ScanOptions)` /
+  `Ble::scan_filtered_with_options(timeout, opts, pred)` — name filter plus
+  optional `ScanOptions { rssi_min }` floor.
 - `Lamp::connect(&ble, addr, name)` — connect to a known lamp.
-- `Lamp::connect_with_options(&ble, addr, name, ConnectOptions)` — custom timeout/retries.
-- `Lamp::is_connected()` / `Lamp::is_encrypted()` — link state helpers.
+- `Lamp::connect_with_options(&ble, addr, name, ConnectOptions)` — custom
+  timeout/retries (`timeout`, `discovery_retries`, `write_retries`,
+  `post_connect_delay`, `discovery_retry_delay`, `reconnect_delay`,
+  `notification_timeout`).
+- `Lamp::is_connected()` / `Lamp::is_encrypted()` / `Lamp::reconnect()` —
+  link state helpers.
 - `Lamp::close()` — disconnect.
-- `Lamp::send_batch(frames, delay)` — send raw 9-byte frames in sequence.
+- `Lamp::send_batch(frames, delay)` — send prebuilt `[u8; 9]` frames in
+  sequence with a throttle gap between writes.
 
 ### Power & color
 - `light_on(bool)`, `set_color_rgb(r, g, b)` / `set_color(0xRRGGBB)`,
-  `set_hsv(h, s, v)`, `set_color_temperature(warm, cold)`, `set_single_color(idx)`,
-  `set_brightness(level, light_mode)`, `fade_brightness(from, to, steps, mode, delay)`,
-  `set_pin_sequence(seq)`.
+  `set_hsv(h, s, v)`, `set_color_temperature(warm, cold)`,
+  `set_single_color(idx)`, `set_pin_sequence(seq)`.
+- `set_brightness(level, LightMode)` / `set_brightness_raw(level, u8)`,
+  `fade_brightness(from, to, steps, LightMode, delay)` /
+  `fade_brightness_raw(.., u8, ..)`.
+- `set_rgbw_status(mask, LightMode)` / `set_rgbw_status_raw(mask, u8)`.
 - Pure helpers: `hsv_to_rgb(h, s, v)`, `brightness_steps(from, to, steps)`.
 
 ### Effects / mic / laser / timing / RGBW
-- `set_mode(mode)`, `set_mode_speed(speed)`, `set_effect(mode, speed)`,
-  `music_amplitude(color, brightness)`.
-- `set_mic_on_off`, `set_mic_sensitive`, `set_mic_eq_mode`.
-- `set_laser`, `set_laser_mode`, `set_laser_speed`.
-- `set_countdown`, `send_system_time`, `send_timing_status`.
-- `set_rgbw_status(rgbw_on, light_mode)`.
+- `set_mode(EffectMode)` / `set_mode_raw(u8)`, `set_mode_speed(speed)`,
+  `set_effect(EffectMode, speed)` / `set_effect_raw(u8, speed)`,
+  `music_amplitude(0xRRGGBB, brightness)`.
+- `set_mic_on_off(bool)`, `set_mic_sensitive(level)`,
+  `set_mic_eq_mode(MicEqMode)` / `set_mic_eq_mode_raw(u8)`.
+- `set_laser(LaserState)` / `set_laser_raw(u8)`,
+  `set_laser_mode(LaserMode)` / `set_laser_mode_raw(u8)`,
+  `set_laser_speed(speed)`.
+- `set_countdown_now(hour, min, weeks, TimingMode)` /
+  `set_countdown_raw(timestamp, u8)`, `send_system_time(hm, weeks)` /
+  `send_system_time_now()`, `send_timing_status(hm, TimingMode, weeks)` /
+  `send_timing_status_raw(hm, u8, weeks)`.
+- `subscribe_timing()` / `read_timing_info()` / `unsubscribe_timing()` —
+  `0x85` timing readback via notify (`TimingInfo::{slots, timestamp(),
+  timing_mode(), weeks()}`, `TimingInfo::parse(&[u8])`).
 
 Pure builders (`light_on_frame`, `brightness_frame`, …) are also public:
 `const fn`, zero-alloc, golden-tested byte-for-byte against the Go client.
@@ -115,7 +152,7 @@ Short answer: **no — it can't send anything the stock app wouldn't.**
 
 Every command is bit-identical to what `wl.smartled` transmits
 (verified by golden tests in `tests/golden_frames.rs`). Params are typed
-`u8`, so oversized values can't wrap around; the XOR cipher only
+enums/`u8`, so oversized values can't wrap around; the XOR cipher only
 scrambles bytes, never amplifies current; and the controller firmware
 remains the sole authority over LED power. Start at low brightness on a
 fresh strip anyway — same advice as with the original app.
@@ -143,7 +180,8 @@ per-write allocation), `const fn` frame builders, event-driven scans via
 
 ## Protocol summary
 
-Service `0xFFF0`, write characteristic `0xFFF3`. Each command is 9 bytes:
+Service `0xFFF0`, write characteristic `0xFFF3`, notify characteristic
+`0xFFF4`. Each command is 9 bytes:
 
 ```text
 0x7E  LEN  CMD  P1  P2  P3  P4  P5  0xEF

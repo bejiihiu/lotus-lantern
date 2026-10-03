@@ -7,16 +7,16 @@
 //!
 //! ```no_run
 //! use std::time::Duration;
-//! use lotus_lantern::{Ble, Lamp};
+//! use lotus_lantern::{Ble, EffectMode, Lamp, LightMode};
 //!
 //! # async fn demo() -> anyhow::Result<()> {
 //! let ble = Ble::new().await?;
-//! let found = ble.discover(Duration::from_secs(15)).await?;
+//! let found = ble.discover(Duration::from_secs(8)).await?;
 //! let lamp = Lamp::connect(&ble, &found.addr, &found.name).await?;
 //! lamp.light_on(true).await?;
 //! lamp.set_color_rgb(255, 0, 128).await?;
-//! lamp.set_brightness(180, 0).await?;
-//! lamp.set_mode(5).await?;
+//! lamp.set_brightness(60, LightMode::Mode0).await?;
+//! lamp.set_effect(EffectMode::Breathe, 128).await?;
 //! lamp.close().await?;
 //! # Ok(())
 //! # }
@@ -24,11 +24,15 @@
 //!
 //! ## Layout
 //!
-//! * [`frame`] — pure 9-byte frame builders (`const fn`, zero-alloc).
-//! * [`encryption`] — XOR cipher for `ELK-*` devices, zero-copy.
-//! * [`color`] / [`timing`] — ports of `Utils.newColor` / `getTimeStamp`,
-//!   plus [`color::hsv_to_rgb`] and [`color::brightness_steps`] for the
-//!   `set_hsv` / `fade_brightness` helpers.
+//! * Frame builders ([`brightness_frame`], …) — pure 9-byte builders
+//!   (`const fn`, zero-alloc).
+//! * [`encrypt_into`] — XOR cipher for `ELK-*` devices, zero-copy.
+//! * Color helpers re-exported as [`hsv_to_rgb`] / [`brightness_steps`]
+//!   for the `set_hsv` / `fade_brightness` methods;
+//!   [`countdown_delay`] ports `Utils.getTimeStamp`.
+//! * Typed enums for modes ([`EffectMode`], [`LightMode`], mic EQ, laser,
+//!   [`TimingMode`]) with `Custom(u8)` / `*_raw` escape hatches.
+//! * [`TimingInfo`] — `0x85` timing-readback parser.
 //! * [`Ble`] / [`Lamp`] — async btleplug transport with BLEDOM reconnect quirks.
 //!   [`Lamp::set_effect`] combines mode + speed, [`Lamp::connect_with_options`]
 //!   tunes timeouts/retries, [`Ble::scan_sorted`] sorts by RSSI.
@@ -46,10 +50,11 @@ mod encryption;
 mod error;
 mod frame;
 mod lamp;
+mod model;
 mod timing;
 
-pub use ble::{Ble, DiscoveredLamp};
-pub use color::{blend_brightness, brightness_steps, hsv_to_rgb};
+pub use ble::{Ble, DiscoveredLamp, ScanOptions};
+pub use color::{blend_brightness, brightness_steps, hsv_to_rgb, music_react_rgb};
 pub use consts::{
     is_encrypted_device, is_supported_name, ENCRYPTION_MARKER, NAME_FILTER, NAME_LED_LIGHT_STRIP,
     NAME_NEW_STRENGTH, NAME_PREFIXES, NAME_WAVY_FILTER, SERVICE_UUID, WRITE_CHAR_UUID,
@@ -63,9 +68,11 @@ pub use frame::{
     is_well_formed, laser_frame, laser_mode_frame, laser_speed_frame, light_on_frame,
     mic_eq_mode_frame, mic_on_off_frame, mic_sensitive_frame, mode_frame, mode_speed_frame,
     music_amplitude_frame, pin_sequence_frame, rgbw_status_frame, single_color_frame,
-    system_time_frame, timing_status_frame, Frame, COMMAND_BRIGHTNESS, COMMAND_LASER_SPEED,
-    COMMAND_MIC, COMMAND_MODE, COMMAND_PIN_ORDER, COMMAND_POWER_RGBW, COMMAND_RGB,
-    COMMAND_SYSTEM_TIME, COMMAND_TIMING, COMMAND_TIMING_STATUS, DEFAULT_PIN_SEQUENCE,
+    system_time_frame, timing_read_request_frame, timing_status_frame, Frame, COMMAND_BRIGHTNESS,
+    COMMAND_LASER_SPEED, COMMAND_MIC, COMMAND_MODE, COMMAND_PIN_ORDER, COMMAND_POWER_RGBW,
+    COMMAND_RGB, COMMAND_SYSTEM_TIME, COMMAND_TIMING, COMMAND_TIMING_READBACK,
+    COMMAND_TIMING_STATUS, DEFAULT_PIN_SEQUENCE,
 };
 pub use lamp::{ConnectOptions, Lamp};
-pub use timing::{countdown_delay, pack_hour_minute};
+pub use model::{EffectMode, LaserMode, LaserState, LightMode, MicEqMode, TimingMode};
+pub use timing::{countdown_delay, pack_hour_minute, pack_system_time_now, TimingInfo};

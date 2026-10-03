@@ -15,8 +15,21 @@ BLE GATT. App also broadcasts via BLE advertising for multi-device push, but eve
 |---|---|
 | Service UUID | `0000fff0-0000-1000-8000-00805f9b34fb` |
 | Write characteristic UUID | `0000fff3-0000-1000-8000-00805f9b34fb` |
+| Notify characteristic UUID | `0000fff4-0000-1000-8000-00805f9b34fb` |
 | Write type | `WriteWithoutResponse` |
 | Connection delay | sleep 1s after connect, then `discover_services()` |
+
+### GATT findings on the `ELK-BLEDDM` clone (verified on hardware)
+
+- `FFF3` exposes READ + WRITE. A plain GATT read of `FFF3` returns a
+  20-byte ASCII serial (e.g. `YH10273854K162`-style), not command data —
+  so the stock `7E 09 85 b0..b5` timing row is *not* readable there on
+  this clone.
+- `FFF4` exposes NOTIFY. Timing replies and the unsolicited timer
+  broadcast below both arrive as `FFF4` notifications.
+- `TimingInfo::parse` still accepts a real `7E 09 85 b0..b5` row for
+  firmware that does answer properly; the client tries plain read, then
+  request-write + read, then the notification wait, in that order.
 
 Supported device-name prefixes: `ELK-`, `ELK~`, `LED LIGHT STRIP`, `XSL-`. App also listens for advertising-mode devices with prefix `NAME_BROADCAST_FILTER` (look up in `Global.java` if needed).
 
@@ -98,6 +111,27 @@ All from `BluetoothLEService.java`. `--` = unused, send `0xFF` or `0x00` per sou
 | `0x85` (read) | Timing info readback | response `7E 09 85 b0 b1 b2 b3 b4 b5` (read characteristic) |
 
 `ts0/1/2` = `time & 0xFF, time>>8 & 0xFF, time>>16 & 0xFF` where `time = Utils.getTimeStamp(hour, minute, weeks)`.
+
+## Timing readback (`0x85`) on the `ELK-BLEDDM` clone (verified on hardware)
+
+The documented flow is "write a read request, get `7E 09 85 b0..b5`
+back". This clone does something else:
+
+1. The client writes the read request to `FFF3`:
+   `7E 04 85 00 FF FF FF 00 EF` (see `timing_read_request_frame`).
+2. A GATT read of `FFF3` right after returns an **echo of the request
+   bytes verbatim** — not a `7E 09 85 …` row. Do not parse the echo as
+   timing data.
+3. A freshly programmed countdown timer arrives **unsolicited** as an
+   `FFF4` notification in countdown-write layout:
+   `7E 07 76 lo mid hi mode FF EF`, where `lo/mid/hi` is the little-endian
+   device timestamp (`seconds-until-fire * 10`, same packing as
+   `Utils.getTimeStamp`) and `mode` is the timing-mode byte.
+
+In short: on this clone there is no `0x85` reply to parse — the `0x76`
+broadcast *is* the confirmation. Other firmware may still answer with the
+documented `7E 09 85 b0..b5` row, which is why `TimingInfo::parse` accepts
+both 9-byte shapes (see `src/timing.rs`).
 
 `Mode` byte gets `+128` (sets high bit) — i.e. modes are sent as `0x80..0xFF`.
 

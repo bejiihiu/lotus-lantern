@@ -104,6 +104,28 @@ pub fn blend_brightness(brightness: u8, rgb: u32) -> u32 {
     (0xFF << 24) | (r8 << 16) | (g8 << 8) | b8
 }
 
+/// Music-react color mix: `rgb` is `0xRRGGBB` (high byte ignored),
+/// `brightness` replaces the V channel.
+///
+/// Pure black (`rgb & 0x00FF_FFFF == 0`) passes through as `(0, 0, 0)` —
+/// without this guard black would come back as `brightness`-gray, because
+/// the HSV mix cannot tell "black" from "zero saturation". Returns plain
+/// `(r, g, b)` channels ready for the `0x05 … 0x20` frame.
+#[must_use]
+pub fn music_react_rgb(rgb: u32, brightness: u8) -> (u8, u8, u8) {
+    // channels — младшие 24 бита, старший байт (если есть) не значит ничего)
+    let channels = rgb & 0x00FF_FFFF;
+    if channels == 0 {
+        return (0, 0, 0);
+    }
+    let mixed = blend_brightness(brightness, rgb);
+    (
+        ((mixed >> 16) & 0xFF) as u8,
+        ((mixed >> 8) & 0xFF) as u8,
+        (mixed & 0xFF) as u8,
+    )
+}
+
 fn rem(a: f64, b: f64) -> f64 {
     // mirrors Go's trunc-based mod, keeps negatives wrapping into [0, b).
     // trunc toward zero is what the Java/Go originals do, hence the cast)
@@ -185,5 +207,22 @@ mod tests {
         assert_eq!(brightness_steps(10, 20, 2), vec![10, 15, 20]);
         assert_eq!(brightness_steps(20, 10, 2), vec![20, 15, 10]);
         assert_eq!(brightness_steps(5, 99, 0), vec![99]);
+    }
+
+    #[test]
+    fn music_react_keeps_single_contract() {
+        // чёрный — это чёрный, а не серый на яркости)
+        assert_eq!(music_react_rgb(0x0000_0000, 200), (0, 0, 0));
+        assert_eq!(music_react_rgb(0xFF00_0000, 200), (0, 0, 0));
+        // старший байт игнорируется: 0xRRGGBB == 0xAARRGGBB для микса)
+        assert_eq!(
+            music_react_rgb(0x00FF_0000, 128),
+            music_react_rgb(0xFFFF_0000, 128)
+        );
+        // ни один канал не выше brightness)
+        for rgb in [0x00FF_0000, 0x0000_FF00, 0x0000_00FF, 0x0012_3456] {
+            let (r, g, b) = music_react_rgb(rgb, 80);
+            assert!(r <= 80 && g <= 80 && b <= 80, "{rgb:#010X} at 80");
+        }
     }
 }

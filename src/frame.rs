@@ -30,6 +30,9 @@ pub const COMMAND_TIMING: u8 = 0x76;
 pub const COMMAND_PIN_ORDER: u8 = 0x81;
 pub const COMMAND_TIMING_STATUS: u8 = 0x82;
 pub const COMMAND_SYSTEM_TIME: u8 = 0x83;
+/// Timing-info readback (`docs/PROTOCOL.md`): the reply `7E 09 85 b0..b5`
+/// arrives as a notification, it is never sent by us.
+pub const COMMAND_TIMING_READBACK: u8 = 0x85;
 
 /// Power on/off. Go: `LightOn`.
 #[inline]
@@ -272,6 +275,22 @@ pub const fn timing_status_frame(hour_minute: u32, timing_mode: u8, weeks: u8) -
     ]
 }
 
+/// Timing-info read request (`CMD 0x85`).
+///
+/// Best-effort shape: mirrors the stock single-param reads
+/// (`LEN 0x04`, slot byte + `FF FF FF 00` padding). Slot `0` asks for the
+/// first timing row. Verified on hardware (`ELK-BLEDDM` clone): the reply
+/// arrives as an `FFF4` notification; on that clone it echoes the request
+/// bytes verbatim, while a freshly programmed timer is broadcast
+/// unsolicited as a `0x76` frame (same layout as [`countdown_frame`]).
+/// Other firmware may answer with the documented `7E 09 85 b0..b5` row —
+/// [`crate::TimingInfo::parse`] accepts both 9-byte shapes.
+#[inline]
+#[must_use]
+pub const fn timing_read_request_frame() -> Frame {
+    [0x7E, 0x04, 0x85, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0xEF]
+}
+
 /// Frame envelope sanity check: start/end markers and length range.
 #[inline]
 #[must_use]
@@ -380,5 +399,14 @@ mod tests {
         ] {
             assert!(is_well_formed(&f), "{f:02X?}");
         }
+    }
+
+    #[test]
+    fn timing_read_request_is_well_formed() {
+        // запрос чтения шлём как обычную команду, ответ уже без EF)
+        let f = timing_read_request_frame();
+        assert_eq!(f, [0x7E, 0x04, 0x85, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0xEF]);
+        assert!(is_well_formed(&f));
+        assert_eq!(f[2], COMMAND_TIMING_READBACK);
     }
 }
